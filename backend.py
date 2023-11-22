@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from moviepy.editor import VideoFileClip
 import shutil
 import os
 from uuid import uuid4
@@ -14,9 +15,11 @@ DATABASE_URL = "sqlite.db"
 
 # 视频文件的存储目录
 VIDEO_DIR = "videos"
+AUDIO_DIR = "audios"
 
-# 确保视频存储目录存在
+# 确保音视频存储目录存在
 os.makedirs(VIDEO_DIR, exist_ok=True)
+os.makedirs(AUDIO_DIR, exist_ok=True)
 
 app = FastAPI()
 
@@ -111,3 +114,22 @@ async def get_video(filename: str):
         raise HTTPException(status_code=404, detail="Video not found")
 
     return FileResponse(video_path)
+
+# 提取视频中的音频接口 请求这个接口需要对文件名url编码
+@app.post("/extract-audio/{filename}")
+async def extract_audio(filename: str):
+    video_path = os.path.join(VIDEO_DIR, filename)
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    audio_path = os.path.join(AUDIO_DIR, filename + '.mp3')
+    try:
+        video_clip = VideoFileClip(video_path)
+        audio_clip = video_clip.audio
+        audio_clip.write_audiofile(audio_path)
+        audio_clip.close()
+        video_clip.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"audio_file": audio_path}
