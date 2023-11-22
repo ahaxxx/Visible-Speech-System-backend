@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import shutil
 import os
@@ -102,3 +103,11 @@ def delete_video(video_id: int):
     conn.commit()
     conn.close()
     return {"status": "Video deleted"}
+
+@app.get("/videos/{filename}")
+async def get_video(filename: str):
+    video_path = os.path.join(VIDEO_DIR, filename)
+    if not os.path.isfile(video_path):
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    return FileResponse(video_path)
