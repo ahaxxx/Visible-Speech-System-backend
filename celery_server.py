@@ -23,7 +23,7 @@ def transcribe_audio(self, filename: str):
     Path(os.path.dirname(transcript_txt_path)).mkdir(parents=True, exist_ok=True)
     Path(os.path.dirname(transcript_srt_path)).mkdir(parents=True, exist_ok=True)
 
-    model = whisper.load_model("tiny")
+    model = whisper.load_model("medium")
     result = model.transcribe(audio_path, language="Chinese")
 
     with open(transcript_txt_path, "w", encoding='utf-8') as txt_file:

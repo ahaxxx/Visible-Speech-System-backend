@@ -1,3 +1,4 @@
+import jieba
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -9,9 +10,8 @@ from datetime import datetime
 import sqlite3
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
-import whisper
+from wordcloud import WordCloud
 from celery_server import transcribe_audio,simple_test
-from src import transcribe_to_srt_and_txt
 
 # 数据库文件位置
 DATABASE_URL = "sqlite.db"
@@ -20,6 +20,7 @@ DATABASE_URL = "sqlite.db"
 VIDEO_DIR = "output/videos"
 AUDIO_DIR = "output/audios"
 TRANSCRIPT_DIR = "output/transcripts"  # 转录文件将被保存的目录
+WORDCLOUD_DIR = "output/wordclouds"    # 词云图像保存目录
 
 
 # 确保音视频存储目录存在
@@ -169,3 +170,33 @@ async def test_celery():
         return {"task_id": task.id}
     except Exception as e:
         return {"error": str(e)}
+
+
+# 生成词云接口
+@app.post("/generate-wordcloud/{filename}")
+async def generate_wordcloud(filename: str):
+    transcript_path = os.path.join(TRANSCRIPT_DIR, filename + ".txt")
+    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_wordcloud.png")
+
+    if not os.path.exists(transcript_path):
+        raise HTTPException(status_code=404, detail="Transcript file not found")
+
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as file:
+            text = file.read()
+
+        text = " ".join(jieba.cut(text))
+        wordcloud = WordCloud(
+            font_path='C:/Windows/Fonts/simhei.ttf',  # 根据实际情况调整字体路径
+            background_color='white',
+            width=800,
+            height=600,
+            margin=2
+        ).generate(text)
+
+        os.makedirs(os.path.dirname(wordcloud_path), exist_ok=True)
+        wordcloud.to_file(wordcloud_path)
+
+        return {"message": "Wordcloud generated successfully", "wordcloud_file": wordcloud_path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
