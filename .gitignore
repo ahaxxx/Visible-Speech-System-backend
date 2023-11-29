@@ -27,4 +27,5 @@ sqilite.db
 *.sw?
 videos
 audios
+output
 __pycache__

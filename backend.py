@@ -9,13 +9,18 @@ from datetime import datetime
 import sqlite3
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
+import whisper
+from celery_server import transcribe_audio,simple_test
+from src import transcribe_to_srt_and_txt
 
 # 数据库文件位置
 DATABASE_URL = "sqlite.db"
 
 # 视频文件的存储目录
-VIDEO_DIR = "videos"
-AUDIO_DIR = "audios"
+VIDEO_DIR = "output/videos"
+AUDIO_DIR = "output/audios"
+TRANSCRIPT_DIR = "output/transcripts"  # 转录文件将被保存的目录
+
 
 # 确保音视频存储目录存在
 os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -133,3 +138,34 @@ async def extract_audio(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"audio_file": audio_path}
+
+# 通过whisper将音频转录为文本 请求这个接口需要对文件名url编码
+@app.post("/transcribe-audio/{filename}")
+async def transcribe_audio_request(filename: str):
+    try:
+        task = transcribe_audio.delay(filename)
+        return {"task_id": task.id}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/get-task-status/{task_id}")
+async def get_task_status(task_id: str):
+    task = transcribe_audio.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        # 任务正在等待处理或未找到
+        return {"status": "pending"}
+    elif task.state != 'FAILURE':
+        # 任务正在运行或已完成
+        return {"status": task.state, "result": task.result}
+    else:
+        # 任务失败
+        return {"status": "failure", "error": str(task.info)}
+
+
+@app.post("/test-celery")
+async def test_celery():
+    try:
+        task = simple_test.delay()
+        return {"task_id": task.id}
+    except Exception as e:
+        return {"error": str(e)}
