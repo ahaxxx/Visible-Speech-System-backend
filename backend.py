@@ -12,6 +12,7 @@ from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 from wordcloud import WordCloud
 from celery_server import transcribe_audio,simple_test
+from fastapi.staticfiles import StaticFiles
 
 # 数据库文件位置
 DATABASE_URL = "sqlite.db"
@@ -28,6 +29,8 @@ os.makedirs(VIDEO_DIR, exist_ok=True)
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="output/wordclouds"), name="static")
+
 
 # 添加 CORS 中间件
 app.add_middleware(
@@ -200,3 +203,13 @@ async def generate_wordcloud(filename: str):
         return {"message": "Wordcloud generated successfully", "wordcloud_file": wordcloud_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 请求单个词云图片
+@app.get("/get-wordcloud/{filename}")
+async def get_wordcloud(filename: str):
+    wordcloud_path = f"output/wordclouds/{filename}_wordcloud.png"
+
+    if os.path.exists(wordcloud_path):
+        return FileResponse(wordcloud_path)
+    else:
+        raise HTTPException(status_code=404, detail="Wordcloud image not found")
