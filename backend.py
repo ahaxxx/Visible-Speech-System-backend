@@ -213,3 +213,14 @@ async def get_wordcloud(filename: str):
         return FileResponse(wordcloud_path)
     else:
         raise HTTPException(status_code=404, detail="Wordcloud image not found")
+
+# 删除指定的创建词云文件
+@app.delete("/delete-wordcloud/{filename}")
+async def delete_wordcloud(filename: str):
+    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_wordcloud.png")
+
+    if os.path.exists(wordcloud_path):
+        os.remove(wordcloud_path)
+        return {"message": "Wordcloud image deleted successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Wordcloud image not found")
