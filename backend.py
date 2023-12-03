@@ -11,8 +11,19 @@ import sqlite3
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 import json
+
+from textblob import TextBlob
+
 from celery_server import transcribe_audio,simple_test
 from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+import requests
+
+# 加载环境变量
+load_dotenv()  # 加载 .env 文件中的变量
+API_KEY = os.getenv("api_key")  # 从环境变量读取 API 密钥
+API_URL = os.getenv("api_url")  # 从环境变量读取 API URL
+
 
 # 数据库文件位置
 DATABASE_URL = "sqlite.db"
@@ -22,8 +33,7 @@ VIDEO_DIR = "output/videos"
 AUDIO_DIR = "output/audios"
 TRANSCRIPT_DIR = "output/transcripts"  # 转录文件将被保存的目录
 WORDCLOUD_DIR = "output/wordclouds"    # 词云图像保存目录
-
-
+TRANSLATED_DIR = "output/translated"  # 翻译文件目录
 
 # 确保音视频存储目录存在
 os.makedirs(VIDEO_DIR, exist_ok=True)
@@ -236,4 +246,110 @@ async def delete_wordcloud(filename: str):
         os.remove(wordcloud_path)
         return {"message": "Wordcloud json deleted successfully"}
     else:
-        raise HTTPException(status_code=404, detail="Wordcloud image not found")
+        raise HTTPException(status_code=404, detail="Wordcloud json not found")
+
+
+# 情感分析
+def analyze_sentiment(text):
+    analysis = TextBlob(text)
+    return 'positive' if analysis.sentiment.polarity > 0 else 'negative' if analysis.sentiment.polarity < 0 else 'neutral'
+
+# 根据字幕请求返回标记情感的json
+@app.get("/analyze-sentiment/{filename}")
+async def analyze_subtitle(filename: str):
+    file_path = os.path.join(TRANSCRIPT_DIR, filename+".srt")
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Subtitle file not found")
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+
+        subtitles = []
+        for i in range(0, len(lines), 3):  # 三行一循环
+            if i + 1 < len(lines):
+                time = lines[i].strip()
+                content = lines[i + 1].strip()
+
+                subtitle = {
+                    'time': time,
+                    'content': content,
+                    'sentiment': analyze_sentiment(content)
+                }
+                subtitles.append(subtitle)
+
+        return subtitles
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# def translate_and_add_punctuation(text, api_key):
+#     # 分割文本为更小的块以适应 API 限制
+#     def split_text(text, max_length=800):
+#         words = text.split()
+#         chunks = []
+#         current_chunk = []
+#
+#         for word in words:
+#             current_chunk.append(word)
+#             if len(' '.join(current_chunk)) > max_length:
+#                 chunks.append(' '.join(current_chunk))
+#                 current_chunk = []
+#
+#         chunks.append(' '.join(current_chunk))  # 添加最后一块
+#         return chunks
+#
+#     # 使用 jieba 进行中文分词
+#     text = " ".join(jieba.cut(text))
+#
+#     # 处理文本
+#     chunks = split_text(text)
+#     translated_chunks = []
+#
+#     for chunk in chunks:
+#         data = {
+#             "model": "gpt-3.5-turbo",
+#             "messages": [
+#                 {
+#                     "role": "system",
+#                     "content": "你现在是一个翻译器和标点添加接口，把用户给你的文本段落翻译成中文"
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": chunk
+#                 }
+#             ]
+#         }
+#         response = requests.post(API_URL, headers={"Authorization": f"Bearer {api_key}"}, json=data)
+#         if response.status_code == 200:
+#             translated_chunks.append(response.json()['choices'][0]['message']['content'])
+#         else:
+#             raise Exception(f"API request failed with status code {response.status_code}")
+#
+#     return ' '.join(translated_chunks)
+#
+# @app.post("/translate-srt/{filename}")
+# async def translate_srt(filename: str):
+#     input_srt_path = os.path.join(TRANSCRIPT_DIR, filename)
+#     output_srt_path = os.path.join(TRANSLATED_DIR, filename)
+#     output_txt_path = os.path.join(TRANSLATED_DIR, f"{filename}.txt")
+#
+#     try:
+#         with open(input_srt_path, "r", encoding="utf-8") as file:
+#             text = file.read()
+#
+#         translated_text = translate_and_add_punctuation(text, API_KEY)
+#
+#         os.makedirs(os.path.dirname(output_srt_path), exist_ok=True)
+#         with open(output_srt_path, "w", encoding="utf-8") as file:
+#             file.write(translated_text)
+#
+#         with open(output_txt_path, "w", encoding="utf-8") as file:
+#             file.write(translated_text)
+#
+#         return {"message": "Translation completed", "srt_file": output_srt_path, "txt_file": output_txt_path}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
