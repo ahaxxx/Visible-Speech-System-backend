@@ -15,7 +15,7 @@ TRANSCRIPT_DIR = "output/transcripts"
 @celery_app.task(bind=True)
 def transcribe_audio(self, filename: str):
     print("start subprocess")
-    audio_path = os.path.join(AUDIO_DIR, filename+'.mp4.mp3')
+    audio_path = os.path.join(AUDIO_DIR, filename+'mp3')
     transcript_txt_path = os.path.join(TRANSCRIPT_DIR, filename + '.txt')
     transcript_srt_path = os.path.join(TRANSCRIPT_DIR, filename + '.srt')
 

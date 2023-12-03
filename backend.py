@@ -127,7 +127,7 @@ async def get_video(filename: str):
 # 提取视频中的音频接口 请求这个接口需要对文件名url编码
 @app.post("/extract-audio/{filename}")
 async def extract_audio(filename: str):
-    video_path = os.path.join(VIDEO_DIR, filename)
+    video_path = os.path.join(VIDEO_DIR, filename+".mp4")
     if not os.path.isfile(video_path):
         raise HTTPException(status_code=404, detail="Video not found")
 
