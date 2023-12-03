@@ -10,7 +10,7 @@ from datetime import datetime
 import sqlite3
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
-from wordcloud import WordCloud
+import json
 from celery_server import transcribe_audio,simple_test
 from fastapi.staticfiles import StaticFiles
 
@@ -22,6 +22,7 @@ VIDEO_DIR = "output/videos"
 AUDIO_DIR = "output/audios"
 TRANSCRIPT_DIR = "output/transcripts"  # 转录文件将被保存的目录
 WORDCLOUD_DIR = "output/wordclouds"    # 词云图像保存目录
+
 
 
 # 确保音视频存储目录存在
@@ -179,40 +180,52 @@ async def test_celery():
 @app.post("/generate-wordcloud/{filename}")
 async def generate_wordcloud(filename: str):
     transcript_path = os.path.join(TRANSCRIPT_DIR, filename + ".txt")
-    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_wordcloud.png")
+    freq_path = os.path.join(WORDCLOUD_DIR, filename + "_freq.json")
 
     if not os.path.exists(transcript_path):
         raise HTTPException(status_code=404, detail="Transcript file not found")
 
     try:
+        # 如果词频文件存在，则直接返回该文件
+        if os.path.exists(freq_path):
+            with open(freq_path, "r", encoding="utf-8") as freq_file:
+                freq_data = json.load(freq_file)
+            return freq_data
+
+        # 否则，处理文本，计算词频
         with open(transcript_path, "r", encoding="utf-8") as file:
             text = file.read()
 
-        text = " ".join(jieba.cut(text))
-        wordcloud = WordCloud(
-            font_path='C:/Windows/Fonts/simhei.ttf',  # 根据实际情况调整字体路径
-            background_color='white',
-            width=800,
-            height=600,
-            margin=2
-        ).generate(text)
+        # 使用jieba进行分词
+        words = jieba.cut(text)
+        word_freq = {}
+        for word in words:
+            if word not in word_freq:
+                word_freq[word] = 0
+            word_freq[word] += 1
 
-        os.makedirs(os.path.dirname(wordcloud_path), exist_ok=True)
-        wordcloud.to_file(wordcloud_path)
+        # 保存词频数据为JSON文件
+        os.makedirs(os.path.dirname(freq_path), exist_ok=True)
+        with open(freq_path, "w", encoding="utf-8") as freq_file:
+            json.dump(word_freq, freq_file, ensure_ascii=False)
 
-        return {"message": "Wordcloud generated successfully", "wordcloud_file": wordcloud_path}
+        return {"message": "Word frequency data generated successfully", "frequency_file": freq_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# 请求单个词云图片
+# 请求单个词频数据
 @app.get("/get-wordcloud/{filename}")
 async def get_wordcloud(filename: str):
-    wordcloud_path = f"output/wordclouds/{filename}_wordcloud.png"
+    freq_path = os.path.join(WORDCLOUD_DIR, filename + "_freq.json")
 
-    if os.path.exists(wordcloud_path):
-        return FileResponse(wordcloud_path)
-    else:
-        raise HTTPException(status_code=404, detail="Wordcloud image not found")
+    if not os.path.exists(freq_path):
+        raise HTTPException(status_code=404, detail="Frequency data file not found")
+
+    try:
+        with open(freq_path, "r", encoding="utf-8") as file:
+            freq_data = json.load(file)
+        return freq_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # 删除指定的创建词云文件
 @app.delete("/delete-wordcloud/{filename}")

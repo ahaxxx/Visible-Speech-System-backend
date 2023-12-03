@@ -15,7 +15,7 @@ TRANSCRIPT_DIR = "output/transcripts"
 @celery_app.task(bind=True)
 def transcribe_audio(self, filename: str):
     print("start subprocess")
-    audio_path = os.path.join(AUDIO_DIR, filename+'mp3')
+    audio_path = os.path.join(AUDIO_DIR, filename+'.mp3')
     transcript_txt_path = os.path.join(TRANSCRIPT_DIR, filename + '.txt')
     transcript_srt_path = os.path.join(TRANSCRIPT_DIR, filename + '.srt')
 
@@ -24,7 +24,7 @@ def transcribe_audio(self, filename: str):
     Path(os.path.dirname(transcript_srt_path)).mkdir(parents=True, exist_ok=True)
 
     model = whisper.load_model("medium")
-    result = model.transcribe(audio_path, language="Chinese")
+    result = model.transcribe(audio_path, language="English")
 
     with open(transcript_txt_path, "w", encoding='utf-8') as txt_file:
         txt_file.write(result["text"])
