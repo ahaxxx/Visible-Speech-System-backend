@@ -11,13 +11,11 @@ import sqlite3
 from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 import json
-
 from textblob import TextBlob
-
 from celery_server import transcribe_audio,simple_test
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-import requests
+
 
 # 加载环境变量
 load_dotenv()  # 加载 .env 文件中的变量
@@ -283,7 +281,14 @@ async def analyze_subtitle(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/get-audio/{filename}")
+async def get_audio(filename: str):
+    file_path = os.path.join(AUDIO_DIR, filename+".mp3")
 
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(file_path)
 
 
 # def translate_and_add_punctuation(text, api_key):
