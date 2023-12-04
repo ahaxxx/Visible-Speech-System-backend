@@ -1,4 +1,5 @@
 import jieba
+import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -12,7 +13,9 @@ from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from textblob import TextBlob
-from celery_server import transcribe_audio,simple_test
+from wordcloud import WordCloud
+
+from celery_server import transcribe_audio, simple_test, translate_json_task
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
@@ -184,61 +187,49 @@ async def test_celery():
         return {"error": str(e)}
 
 
-# 生成词云接口
 @app.post("/generate-wordcloud/{filename}")
 async def generate_wordcloud(filename: str):
     transcript_path = os.path.join(TRANSCRIPT_DIR, filename + ".txt")
-    freq_path = os.path.join(WORDCLOUD_DIR, filename + "_freq.json")
+    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_wordcloud.png")
 
     if not os.path.exists(transcript_path):
         raise HTTPException(status_code=404, detail="Transcript file not found")
 
     try:
-        # 如果词频文件存在，则直接返回该文件
-        if os.path.exists(freq_path):
-            with open(freq_path, "r", encoding="utf-8") as freq_file:
-                freq_data = json.load(freq_file)
-            return freq_data
-
-        # 否则，处理文本，计算词频
         with open(transcript_path, "r", encoding="utf-8") as file:
             text = file.read()
 
-        # 使用jieba进行分词
-        words = jieba.cut(text)
-        word_freq = {}
-        for word in words:
-            if word not in word_freq:
-                word_freq[word] = 0
-            word_freq[word] += 1
+        text = " ".join(jieba.cut(text))
+        wordcloud = WordCloud(
+            font_path='C:/Windows/Fonts/simhei.ttf',  # 根据实际情况调整字体路径
+            background_color='white',
+            width=800,
+            height=600,
+            margin=2
+        ).generate(text)
 
-        # 保存词频数据为JSON文件
-        os.makedirs(os.path.dirname(freq_path), exist_ok=True)
-        with open(freq_path, "w", encoding="utf-8") as freq_file:
-            json.dump(word_freq, freq_file, ensure_ascii=False)
+        os.makedirs(os.path.dirname(wordcloud_path), exist_ok=True)
+        wordcloud.to_file(wordcloud_path)
 
-        return {"message": "Word frequency data generated successfully", "frequency_file": freq_path}
+        return {"message": "Wordcloud generated successfully", "wordcloud_file": wordcloud_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-# 请求单个词频数据
+
+# 请求单个词云图片
 @app.get("/get-wordcloud/{filename}")
 async def get_wordcloud(filename: str):
-    freq_path = os.path.join(WORDCLOUD_DIR, filename + "_freq.json")
+    wordcloud_path = f"output/wordclouds/{filename}_wordcloud.png"
 
-    if not os.path.exists(freq_path):
-        raise HTTPException(status_code=404, detail="Frequency data file not found")
+    if os.path.exists(wordcloud_path):
+        return FileResponse(wordcloud_path)
+    else:
+        raise HTTPException(status_code=404, detail="Wordcloud image not found")
 
-    try:
-        with open(freq_path, "r", encoding="utf-8") as file:
-            freq_data = json.load(file)
-        return freq_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 # 删除指定的创建词云文件
 @app.delete("/delete-wordcloud/{filename}")
 async def delete_wordcloud(filename: str):
-    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_freq.json")
+    wordcloud_path = os.path.join(WORDCLOUD_DIR, filename + "_wordcloud.json")
 
     if os.path.exists(wordcloud_path):
         os.remove(wordcloud_path)
@@ -252,10 +243,9 @@ def analyze_sentiment(text):
     analysis = TextBlob(text)
     return 'positive' if analysis.sentiment.polarity > 0 else 'negative' if analysis.sentiment.polarity < 0 else 'neutral'
 
-# 根据字幕请求返回标记情感的json
 @app.get("/analyze-sentiment/{filename}")
 async def analyze_subtitle(filename: str):
-    file_path = os.path.join(TRANSCRIPT_DIR, filename+".srt")
+    file_path = os.path.join(TRANSCRIPT_DIR, filename + ".srt")
 
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Subtitle file not found")
@@ -277,9 +267,16 @@ async def analyze_subtitle(filename: str):
                 }
                 subtitles.append(subtitle)
 
+        # 保存 JSON 数据到文件
+        save_path = os.path.join(TRANSCRIPT_DIR, f"{filename}.json")
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, 'w', encoding='utf-8') as json_file:
+            json.dump(subtitles, json_file, ensure_ascii=False, indent=4)
+
         return subtitles
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/get-audio/{filename}")
 async def get_audio(filename: str):
@@ -291,70 +288,162 @@ async def get_audio(filename: str):
     return FileResponse(file_path)
 
 
-# def translate_and_add_punctuation(text, api_key):
-#     # 分割文本为更小的块以适应 API 限制
-#     def split_text(text, max_length=800):
-#         words = text.split()
-#         chunks = []
-#         current_chunk = []
-#
-#         for word in words:
-#             current_chunk.append(word)
-#             if len(' '.join(current_chunk)) > max_length:
-#                 chunks.append(' '.join(current_chunk))
-#                 current_chunk = []
-#
-#         chunks.append(' '.join(current_chunk))  # 添加最后一块
-#         return chunks
-#
-#     # 使用 jieba 进行中文分词
-#     text = " ".join(jieba.cut(text))
-#
-#     # 处理文本
-#     chunks = split_text(text)
-#     translated_chunks = []
-#
-#     for chunk in chunks:
-#         data = {
-#             "model": "gpt-3.5-turbo",
-#             "messages": [
-#                 {
-#                     "role": "system",
-#                     "content": "你现在是一个翻译器和标点添加接口，把用户给你的文本段落翻译成中文"
-#                 },
-#                 {
-#                     "role": "user",
-#                     "content": chunk
-#                 }
-#             ]
-#         }
-#         response = requests.post(API_URL, headers={"Authorization": f"Bearer {api_key}"}, json=data)
-#         if response.status_code == 200:
-#             translated_chunks.append(response.json()['choices'][0]['message']['content'])
-#         else:
-#             raise Exception(f"API request failed with status code {response.status_code}")
-#
-#     return ' '.join(translated_chunks)
-#
-# @app.post("/translate-srt/{filename}")
-# async def translate_srt(filename: str):
-#     input_srt_path = os.path.join(TRANSCRIPT_DIR, filename)
-#     output_srt_path = os.path.join(TRANSLATED_DIR, filename)
-#     output_txt_path = os.path.join(TRANSLATED_DIR, f"{filename}.txt")
-#
-#     try:
-#         with open(input_srt_path, "r", encoding="utf-8") as file:
-#             text = file.read()
-#
-#         translated_text = translate_and_add_punctuation(text, API_KEY)
-#
-#         os.makedirs(os.path.dirname(output_srt_path), exist_ok=True)
-#         with open(output_srt_path, "w", encoding="utf-8") as file:
-#             file.write(translated_text)
-#
-#         with open(output_txt_path, "w", encoding="utf-8") as file:
-#             file.write(translated_text)
-#
-#         return {"message": "Translation completed", "srt_file": output_srt_path, "txt_file": output_txt_path}
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+@app.post("/gpt-request")
+async def gpt_request(prompt: str, text: str):
+    try:
+        data = {
+            "model": "gpt-4-1106-preview",  # 或其他适用的 GPT 模型
+            "messages": [
+                {
+                    "role": "system",
+                    "content": prompt
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        }
+
+        response = requests.post(API_URL, headers={"Authorization": f"Bearer {API_KEY}"}, json=data)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            raise Exception(f"API request failed with status code {response.status_code}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/translate-json/{filename}")
+async def translate_json(filename: str):
+    try:
+        task = translate_json_task.delay(filename)  # 启动后台任务
+        return {"task_id": task.id}  # 返回任务 ID，用于稍后查询任务状态
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/summarize-text/{filename}")
+async def summarize_text(filename: str):
+    file_path = os.path.join(TRANSCRIPT_DIR, filename+".txt")
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=file_path+"TXT file not found")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            text = file.read()
+
+        # 构建 GPT 请求数据
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "你现在是一个文本总结接口，请使用中文总结这段文字:"
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        }
+
+        response = requests.post(API_URL, headers={"Authorization": f"Bearer {API_KEY}"}, json=data)
+        if response.status_code == 200:
+            summary = response.json()['choices'][0]['message']['content']
+            return {"summary": summary}
+        else:
+            raise Exception(f"API request failed with status code {response.status_code}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/evaluate-speech/{filename}")
+async def evaluate_speech(filename: str):
+    file_path = os.path.join(TRANSCRIPT_DIR, filename+".txt")
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="TXT file not found")
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as file:
+            text = file.read()
+
+        # 构建 GPT 请求数据
+        prompt = """
+        我们的评分标准包括以下几个维度：
+        内容分析：研究演讲的主题，信息的详细程度，以及其传递的核心信息和观点。也可以考察其是否涉及特定的政治、社会或文化议题。
+        语言风格：分析演讲者使用的语言特点，如词汇的选择、句式结构、修辞手法（比如比喻、反问、排比）等，以及这些元素如何影响信息的传达。
+        逻辑结构：评估演讲的组织结构，包括论点的提出、论据的支持、结论的得出，以及这些元素如何协同工作以加强演讲的说服力。
+        情感表达：分析演讲中的情感色彩，例如热情、愤怒、同情等，以及这些情感如何与听众的共鸣和反应相联系。
+        目标受众：考虑演讲是如何针对特定听众群体的需求和期望进行定制的，包括使用的语言、内容的选择以及呈现方式。
+        文化和历史背景：考虑演讲在特定的文化和历史背景下的意义，以及它如何反映或影响当时的社会环境。
+        批判性分析：从批判性角度审视演讲的内容，包括其可能的偏见、误导性陈述或遗漏的重要视角。
+        
+        您需要在每个维度上进行0到10分的打分，并给出您的中文评语
+        
+        返回格式为json，示例如下
+        
+        {
+            “内容分析”:{
+                score:,
+                comments:
+            },
+            “语言风格”:{
+                score:,
+                comments:
+            },
+            “逻辑结构”:{
+                score:,
+                comments:
+            },
+            “情感表达”:{
+                score:,
+                comments:
+            },
+            “目标受众”:{
+                score:,
+                comments:
+            },
+            “文化和历史背景”:{
+                score:,
+                comments:
+            },
+            “批判性分析”:{
+                score:,
+                comments:
+            },		
+        }
+        """
+
+        data = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": prompt
+                },
+                {
+                    "role": "user",
+                    "content": text
+                }
+            ]
+        }
+
+        response = requests.post(API_URL, headers={"Authorization": f"Bearer {API_KEY}"}, json=data)
+        if response.status_code == 200:
+            evaluation_str = response.json()['choices'][0]['message']['content']
+            try:
+                # 尝试将字符串解析为 JSON 对象
+                evaluation_json = json.loads(evaluation_str)
+            except json.JSONDecodeError:
+                raise Exception("Failed to parse the evaluation string into JSON")
+
+            return {"evaluation": evaluation_json}
+        else:
+            raise Exception(f"API request failed with status code {response.status_code}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
